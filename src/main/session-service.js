@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { calculateActiveSeconds } from './timer-calculation.js';
 import { deliverEvent, formatSessionEvent } from './event-service.js';
+import { localDateTime } from './vault-writer.js';
 
 function offsetString(date) {
   const minutes = -date.getTimezoneOffset();
@@ -12,6 +13,7 @@ function offsetString(date) {
 export function createSessionService(db, { now = () => new Date() } = {}) {
   const getVault = () => db.prepare("SELECT value FROM settings WHERE key='vault_path'").get()?.value;
   const getSession = (id) => db.prepare('SELECT * FROM sessions WHERE id=?').get(id);
+  const findCurrentSession = () => db.prepare("SELECT * FROM sessions WHERE outcome IN ('Running','Paused') ORDER BY started_at DESC LIMIT 1").get() || null;
 
   function addEvent({ eventType, session, occurredAt }) {
     const id = randomUUID();
@@ -35,7 +37,7 @@ export function createSessionService(db, { now = () => new Date() } = {}) {
   function startSession(input) {
     if (!['Focus', 'Break'].includes(input.type)) throw new Error('Session type must be Focus or Break');
     if (!Number.isInteger(input.plannedSeconds) || input.plannedSeconds <= 0) throw new Error('Duration must be a positive whole number of seconds');
-    if (currentSession()) throw new Error('A session is already active');
+    if (findCurrentSession()) throw new Error('A session is already active');
     let taskId = null; let snapshot = null;
     if (input.type === 'Focus') {
       if (input.taskId) {
@@ -100,7 +102,12 @@ export function createSessionService(db, { now = () => new Date() } = {}) {
   }
 
   function currentSession() {
-    return db.prepare("SELECT * FROM sessions WHERE outcome IN ('Running','Paused') ORDER BY started_at DESC LIMIT 1").get() || null;
+    const session = findCurrentSession();
+    if (!session) return null;
+    const finishedAt = now().toISOString();
+    const pauses = db.prepare('SELECT paused_at AS pausedAt,resumed_at AS resumedAt FROM session_pauses WHERE session_id=? ORDER BY paused_at').all(session.id);
+    const activeSeconds = calculateActiveSeconds({ startedAt: session.started_at, finishedAt, pauses });
+    return { ...session, active_seconds: activeSeconds, remaining_seconds: Math.max(0, session.planned_seconds - activeSeconds) };
   }
 
   function listHistory() {
@@ -110,14 +117,17 @@ export function createSessionService(db, { now = () => new Date() } = {}) {
   function completeLinkedTask(sessionId) {
     const session = getSession(sessionId);
     if (!session?.task_id) return null;
-    const task = db.prepare("SELECT * FROM tasks WHERE id=? AND status='Active'").get(session.task_id);
-    if (!task) return null;
+    if (session.type !== 'Focus' || session.outcome !== 'Completed') throw new Error('Complete the Focus session first');
+    const task = db.prepare("SELECT tasks.*,categories.name category FROM tasks JOIN categories ON categories.id=tasks.category_id WHERE tasks.id=?").get(session.task_id);
+    if (!task || task.status === 'Completed') return task || null;
     const occurredAt = now().toISOString();
     let eventId;
     db.transaction(() => {
       db.prepare("UPDATE tasks SET status='Completed',completed_at=?,updated_at=? WHERE id=?").run(occurredAt, occurredAt, task.id);
       eventId = randomUUID();
-      const markdown = `---\nevent_id: ${eventId}\ndate: ${occurredAt.slice(0, 10)}\ntime: ${occurredAt.slice(11, 19)}\nevent_type: task.completed\nsource_app: StudyVault Focus\ntask_id: ${task.id}\ntitle: ${task.title.replace(/[\r\n]+/g, ' ')}\n---\n\n`;
+      const timezone = offsetString(new Date(occurredAt));
+      const local = localDateTime(occurredAt, timezone);
+      const markdown = `---\nevent_id: ${eventId}\ndate: ${local.date}\ntime: ${local.time}\ntimezone: ${timezone}\nevent_type: task.completed\nstatus: Completed\nsource_app: StudyVault Focus\ntask_id: ${task.id}\ntitle: ${task.title.replace(/[\r\n]+/g, ' ')}\ncategory: ${task.category}\ndue_at: ${task.due_at || 'none'}\n---\n\n`;
       db.prepare(`INSERT INTO log_events
         (id,event_type,occurred_at,timezone_offset,source_app,entity_id,markdown_payload,destination_path,delivery_state,last_error)
         VALUES (?,?,?,?,?,?,?,?, 'Pending', NULL)`)

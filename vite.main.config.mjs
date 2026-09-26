@@ -1,4 +1,6 @@
 import { defineConfig } from 'vite';
 
-// https://vitejs.dev/config
-export default defineConfig({});
+// Native Node modules must stay external so Forge can unpack their .node files.
+export default defineConfig({
+  build: { rollupOptions: { external: ['better-sqlite3'] } },
+});

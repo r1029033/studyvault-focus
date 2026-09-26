@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { dialog, ipcMain } from 'electron';
 import { listActiveTasks } from './database.js';
 import { createSessionService } from './session-service.js';
@@ -29,8 +30,9 @@ export function registerIpc(db) {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     if (result.canceled) return null;
     const vaultPath = result.filePaths[0];
-    const probe = path.join(vaultPath, '.studyvault-write-test');
-    fs.writeFileSync(probe, 'ok'); fs.unlinkSync(probe);
+    const probe = path.join(vaultPath, `.studyvault-write-test-${randomUUID()}`);
+    let handle;
+    try { handle = fs.openSync(probe, 'wx'); } finally { if (handle !== undefined) fs.closeSync(handle); if (fs.existsSync(probe)) fs.unlinkSync(probe); }
     db.prepare('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)').run('vault_path', vaultPath);
     return { vaultPath, failedEvents: 0 };
   }));

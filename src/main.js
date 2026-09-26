@@ -34,10 +34,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  db = openDatabase(getDatabasePath(app.getPath('localAppData')));
+  db = openDatabase(getDatabasePath(process.env.LOCALAPPDATA || app.getPath('appData')));
   sessions = registerIpc(db);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-app.on('before-quit', () => db?.close());
+app.on('will-quit', () => db?.close());
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -30,9 +30,11 @@ export default function App() {
       setSession(currentResult.data);
       setMode(currentResult.data.type);
       setDuration(currentResult.data.planned_seconds);
-      setRemaining((value) => session?.id === currentResult.data.id ? value : currentResult.data.planned_seconds);
+      setRemaining(currentResult.data.remaining_seconds ?? currentResult.data.planned_seconds);
+    } else if (currentResult.ok) {
+      setSession(null);
     }
-  }, [session?.id]);
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -40,12 +42,6 @@ export default function App() {
     window.addEventListener('focus', refresh);
     return () => { clearInterval(poll); window.removeEventListener('focus', refresh); };
   }, [refresh]);
-
-  useEffect(() => {
-    if (session?.outcome !== 'Running') return undefined;
-    const timer = setInterval(() => setRemaining((value) => Math.max(0, value - 1)), 1000);
-    return () => clearInterval(timer);
-  }, [session?.outcome]);
 
   useEffect(() => {
     if (remaining !== 0 || cued.current || session?.outcome !== 'Running') return;
@@ -117,13 +113,13 @@ export default function App() {
           </div>
           <div className="session-panel">
             <h3>Session details</h3>
-            <label>Duration (minutes)<input type="number" min="1" disabled={locked} value={Math.round(duration / 60)} onChange={(event) => { const seconds = Math.max(60, Number(event.target.value) * 60); setDuration(seconds); setRemaining(seconds); }} /></label>
+            <label>Duration (minutes)<input type="number" min="1" step="1" disabled={locked} value={Math.round(duration / 60)} onChange={(event) => { const minutes = Math.max(1, Math.round(Number(event.target.value) || 1)); const seconds = minutes * 60; setDuration(seconds); setRemaining(seconds); }} /></label>
             {mode === 'Focus' && <><label>Active task<select value={taskId} disabled={locked} onChange={(event) => setTaskId(event.target.value)}><option value="">No linked task</option>{tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label><label>Or activity<input disabled={locked} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Review notes" /></label></>}
             {!settings.vaultPath && <div className="notice"><p>Select a writable Obsidian vault before starting.</p><button onClick={chooseVault}>Choose vault</button></div>}
           </div>
         </section>}
         {view === 'history' && <section className="history"><table><thead><tr><th>Started</th><th>Type</th><th>Context</th><th>Planned</th><th>Actual</th><th>Outcome</th></tr></thead><tbody>{history.map((item) => <tr key={item.id}><td>{new Date(item.started_at).toLocaleString()}</td><td>{item.type}</td><td>{item.context_snapshot || '—'}</td><td>{Math.round(item.planned_seconds / 60)} min</td><td>{item.actual_seconds ?? 0} sec</td><td>{item.outcome}</td></tr>)}</tbody></table>{history.length === 0 && <p className="empty">No finished sessions yet.</p>}</section>}
-        {view === 'settings' && <div className="settings-grid"><section className="settings-card"><h3>Obsidian vault</h3><p>{settings.vaultPath || 'No vault selected'}</p><button onClick={chooseVault}>Change vault</button></section><section className="settings-card"><h3>Event delivery</h3><p>Failed events: {settings.failedEvents}</p><button onClick={async () => { await window.studyVault.events.retryAll(); await refresh(); }}>Retry All</button></section></div>}
+        {view === 'settings' && <div className="settings-grid"><section className="settings-card"><h3>Obsidian vault</h3><p>{settings.vaultPath || 'No vault selected'}</p><button onClick={chooseVault}>Change vault</button></section><section className="settings-card"><h3>Event delivery</h3><p>Failed events: {settings.failedEvents}</p><button onClick={async () => { const result = await window.studyVault.events.retryAll(); if (!result.ok) setError(result.error); else setError(`Retry finished: ${result.data.written} written, ${result.data.failed} failed.`); await refresh(); }}>Retry All</button></section></div>}
       </main>
       {finishedSession && <div className="overlay"><div className="dialog" role="dialog" aria-modal="true"><h2>Is this task finished?</h2><p>Mark the linked task complete in StudyVault Tasks?</p><div className="dialog-actions"><button onClick={() => setFinishedSession(null)}>No</button><button className="primary" onClick={async () => { await window.studyVault.sessions.completeLinkedTask(finishedSession.id); setFinishedSession(null); await refresh(); }}>Yes</button></div></div></div>}
     </div>

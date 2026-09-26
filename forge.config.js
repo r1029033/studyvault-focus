@@ -1,4 +1,5 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
+const { AutoUnpackNativesPlugin } = require('@electron-forge/plugin-auto-unpack-natives');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 
 module.exports = {
@@ -53,6 +54,7 @@ module.exports = {
     },
     // Fuses are used to enable/disable various Electron functionality
     // at package time, before code signing the application
+    new AutoUnpackNativesPlugin({}),
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,

@@ -40,12 +40,21 @@ describe('session lifecycle', () => {
     db.close();
   });
 
+  it('reports timestamp-based active and remaining seconds for a restored session', () => {
+    const { db, service } = setup([0, 10000, 30000, 40000]);
+    const session = service.startSession({ type: 'Focus', plannedSeconds: 60, taskId: 'task-1' });
+    service.pauseSession(session.id); service.resumeSession(session.id);
+    expect(service.currentSession()).toMatchObject({ active_seconds: 20, remaining_seconds: 40 });
+    db.close();
+  });
+
   it('completes the linked task while retaining the session snapshot', () => {
     const { db, service } = setup([0, 1000, 2000]);
     const session = service.startSession({ type: 'Focus', plannedSeconds: 60, taskId: 'task-1' });
     db.prepare("UPDATE tasks SET title='Renamed' WHERE id='task-1'").run();
-    service.completeLinkedTask(session.id);
+    expect(() => service.completeLinkedTask(session.id)).toThrow('Complete the Focus session first');
     service.finishSession(session.id, 'Completed');
+    service.completeLinkedTask(session.id);
     expect(db.prepare("SELECT status FROM tasks WHERE id='task-1'").get().status).toBe('Completed');
     expect(service.listHistory()[0].context_snapshot).toBe('Write report');
     db.close();
