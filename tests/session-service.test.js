@@ -14,7 +14,7 @@ function setup(times) {
   db.prepare("INSERT INTO categories(id,name,created_at) VALUES('design','Design',?)").run(new Date(0).toISOString());
   db.prepare("INSERT INTO tasks(id,title,description,due_at,category_id,status,created_at,updated_at,completed_at) VALUES('task-1','Write report','',NULL,'design','Active',?,?,NULL)").run(new Date(0).toISOString(), new Date(0).toISOString());
   let index = 0;
-  return { db, service: createSessionService(db, { now: () => new Date(times[Math.min(index++, times.length - 1)]) }) };
+  return { root, db, service: createSessionService(db, { now: () => new Date(times[Math.min(index++, times.length - 1)]) }) };
 }
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
@@ -49,7 +49,7 @@ describe('session lifecycle', () => {
   });
 
   it('completes the linked task while retaining the session snapshot', () => {
-    const { db, service } = setup([0, 1000, 2000]);
+    const { root, db, service } = setup([0, 1000, 2000]);
     const session = service.startSession({ type: 'Focus', plannedSeconds: 60, taskId: 'task-1' });
     db.prepare("UPDATE tasks SET title='Renamed' WHERE id='task-1'").run();
     expect(() => service.completeLinkedTask(session.id)).toThrow('Complete the Focus session first');
@@ -57,6 +57,10 @@ describe('session lifecycle', () => {
     service.completeLinkedTask(session.id);
     expect(db.prepare("SELECT status FROM tasks WHERE id='task-1'").get().status).toBe('Completed');
     expect(service.listHistory()[0].context_snapshot).toBe('Write report');
+    const taskEvent = db.prepare("SELECT markdown_payload FROM log_events WHERE event_type='task.completed'").get().markdown_payload;
+    expect(taskEvent).toContain('timezone:');
+    expect(taskEvent).toContain('status: Completed');
+    expect(fs.existsSync(path.join(root, 'vault', 'StudyVault Logs', 'Tasks'))).toBe(true);
     db.close();
   });
 });
