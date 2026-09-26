@@ -1,0 +1,44 @@
+import { appendEvent } from './vault-writer.js';
+
+const line = (value) => String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+
+export function formatSessionEvent(event) {
+  const fields = [
+    '---',
+    `event_id: ${line(event.id)}`,
+    `date: ${event.occurredAt.slice(0, 10)}`,
+    `time: ${event.occurredAt.slice(11, 19)}`,
+    `timezone: ${line(event.timezoneOffset)}`,
+    `event_type: ${line(event.eventType)}`,
+    `status: ${line(event.status)}`,
+    `source_app: ${line(event.sourceApp)}`,
+    `session_id: ${line(event.sessionId)}`,
+    `session_type: ${line(event.sessionType)}`,
+    `planned_seconds: ${line(event.plannedSeconds)}`,
+  ];
+  if (event.actualSeconds != null) fields.push(`actual_seconds: ${line(event.actualSeconds)}`);
+  fields.push(`context: ${line(event.contextSnapshot || 'none')}`, '---', '', '');
+  return fields.join('\n');
+}
+
+export function deliverEvent(db, eventId) {
+  const event = db.prepare('SELECT * FROM log_events WHERE id=?').get(eventId);
+  if (!event) throw new Error('Event not found');
+  try {
+    const result = appendEvent(event.destination_path, event.occurred_at, event.id, event.markdown_payload);
+    db.prepare("UPDATE log_events SET delivery_state='Written', last_error=NULL WHERE id=?").run(eventId);
+    return { state: 'Written', duplicate: result.duplicate };
+  } catch (error) {
+    db.prepare("UPDATE log_events SET delivery_state='Failed', last_error=? WHERE id=?").run(error.message, eventId);
+    throw error;
+  }
+}
+
+export function retryAllEvents(db) {
+  const rows = db.prepare("SELECT id FROM log_events WHERE delivery_state IN ('Pending','Failed') ORDER BY occurred_at").all();
+  let written = 0; let failed = 0;
+  for (const row of rows) {
+    try { deliverEvent(db, row.id); written += 1; } catch { failed += 1; }
+  }
+  return { written, failed };
+}
