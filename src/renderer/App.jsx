@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import appIcon from '../assets/studyvault-focus-icon.png';
+import knittingBunny from '../assets/knitting-bunny.png';
+import redBeanie from '../assets/red-beanie.png';
+import orangeScarf from '../assets/orange-scarf.png';
+import blueFloralCardigan from '../assets/blue-floral-cardigan.png';
 
-const DEFAULT_SECONDS = { Focus: 25 * 60, Break: 5 * 60 };
+// Store session lengths in seconds (the unit used by the session service).
+// These are the only selectable Focus lengths, and each one has its own knit.
+const FOCUS_DURATIONS = [
+  { seconds: 25 * 60, minutes: 25, garment: 'red beanie', article: 'a', image: redBeanie },
+  { seconds: 35 * 60, minutes: 35, garment: 'orange scarf', article: 'an', image: orangeScarf },
+  { seconds: 45 * 60, minutes: 45, garment: 'blue floral cardigan', article: 'a', image: blueFloralCardigan },
+];
+const DEFAULT_SECONDS = { Focus: FOCUS_DURATIONS[0].seconds, Break: 5 * 60 };
 const formatTime = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 
 export default function App() {
@@ -89,10 +101,27 @@ export default function App() {
   }
 
   const locked = Boolean(session);
+  // Derive the buddy's project from the selected Focus length so the timer
+  // and garment choice can never drift out of sync.
+  const selectedKnit = FOCUS_DURATIONS.find((option) => option.seconds === duration) || FOCUS_DURATIONS[0];
+  // Remaining time is supplied by the same session state as the timer, so
+  // paused sessions hold their progress and a finished session reaches 100%.
+  const knitProgress = session && mode === 'Focus'
+    ? Math.min(1, Math.max(0, 1 - remaining / duration))
+    : 0;
+  // Only animate while actively counting down; a paused session keeps its
+  // partially knitted item on screen without moving.
+  const isKnitting = session?.outcome === 'Running' && mode === 'Focus' && remaining > 0;
+  // Requiring a session avoids showing a "finished" item on the idle timer.
+  const knitFinished = mode === 'Focus' && remaining === 0 && Boolean(session);
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div><span className="eyebrow">StudyVault</span><h2>Focus</h2></div>
+        {/* The app mark stays visible on every main view: Timer, History, and Settings. */}
+        <div className="app-brand">
+          <img className="app-icon" src={appIcon} alt="StudyVault Focus icon" />
+          <div><span className="eyebrow">StudyVault</span><h2>Focus</h2></div>
+        </div>
         <nav>{['timer', 'history', 'settings'].map((name) => <button key={name} className={view === name ? 'active' : ''} onClick={() => setView(name)}>{name[0].toUpperCase() + name.slice(1)}</button>)}</nav>
         <p className="vault-state">{settings.vaultPath ? '● Vault connected' : '○ Vault not selected'}</p>
       </aside>
@@ -103,7 +132,38 @@ export default function App() {
         {view === 'timer' && <section className="timer-layout">
           <div className="timer-stage">
             <div className="mode-switch"><button disabled={locked} className={mode === 'Focus' ? 'active' : ''} onClick={() => changeMode('Focus')}>Focus</button><button disabled={locked} className={mode === 'Break' ? 'active' : ''} onClick={() => changeMode('Break')}>Break</button></div>
-            <div className="timer-ring"><strong>{formatTime(remaining)}</strong><span>{remaining === 0 ? "Time's up" : session?.outcome || 'Ready'}</span></div>
+            <div className="timer-clock-row">
+              <div className="timer-ring"><strong>{formatTime(remaining)}</strong><span>{remaining === 0 ? "Time's up" : session?.outcome || 'Ready'}</span></div>
+              <section className="study-buddy" aria-label="Study buddy">
+                <h3>Study buddy</h3>
+                <div className={`buddy-avatar${isKnitting ? ' knitting' : ''}${knitFinished ? ' finished' : ''}`} aria-hidden="true">
+                  <img className="buddy-character" src={knittingBunny} alt="" />
+                  {mode === 'Focus' && !knitFinished && (
+                    <div className="knitting-work">
+                      {/* Each paw has its own needle and animation, so they cross like real knitting. */}
+                      <span className="knitting-paw knitting-paw-left" />
+                      <span className="knitting-paw knitting-paw-right" />
+                      {/* The selected garment grows from 40% to full size with timer progress. */}
+                      <img className="buddy-knit-in-progress" src={selectedKnit.image} alt="" style={{ transform: `translateX(-50%) scale(${0.4 + knitProgress * 0.6})`, opacity: Math.max(0.2, knitProgress) }} />
+                    </div>
+                  )}
+                  {knitFinished && <img className="finished-knit" src={selectedKnit.image} alt="" />}
+                </div>
+                {mode === 'Break' ? (
+                  <p className="buddy-status">Taking a break with you.</p>
+                ) : knitFinished ? (
+                  <p className="buddy-status">Finished! Your {selectedKnit.garment} is ready.</p>
+                ) : (
+                  <>
+                    <p className="buddy-status">{isKnitting ? `Knitting ${selectedKnit.article} ${selectedKnit.garment}…` : `Ready to knit ${selectedKnit.article} ${selectedKnit.garment}.`}</p>
+                    <div className="knit-progress" role="progressbar" aria-label={`${selectedKnit.garment} knitting progress`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(knitProgress * 100)}>
+                      <span style={{ width: `${knitProgress * 100}%` }} />
+                    </div>
+                    <span className="knit-progress-label">{Math.round(knitProgress * 100)}% knitted</span>
+                  </>
+                )}
+              </section>
+            </div>
             <div className="timer-actions">
               {!session && <button className="primary" disabled={!settings.vaultPath} onClick={start}>Start {mode.toLowerCase()}</button>}
               {session?.outcome === 'Running' && <button onClick={() => act('pause')}>Pause</button>}
@@ -113,7 +173,16 @@ export default function App() {
           </div>
           <div className="session-panel">
             <h3>Session details</h3>
-            <label>Duration (minutes)<input type="number" min="1" step="1" disabled={locked} value={Math.round(duration / 60)} onChange={(event) => { const minutes = Math.max(1, Math.round(Number(event.target.value) || 1)); const seconds = minutes * 60; setDuration(seconds); setRemaining(seconds); }} /></label>
+            {mode === 'Focus' ? (
+              <>
+                {/* Keep option values in seconds for the session service and progress calculation. */}
+              <label>Duration (minutes)<select value={duration} disabled={locked} onChange={(event) => { const seconds = Number(event.target.value); setDuration(seconds); setRemaining(seconds); }}>
+                {FOCUS_DURATIONS.map((option) => <option key={option.seconds} value={option.seconds}>{option.minutes} minutes — {option.garment}</option>)}
+              </select></label>
+              </>
+            ) : (
+              <label>Duration (minutes)<input type="number" value={Math.round(duration / 60)} disabled readOnly /></label>
+            )}
             {mode === 'Focus' && <><label>Active task<select value={taskId} disabled={locked} onChange={(event) => setTaskId(event.target.value)}><option value="">No linked task</option>{tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label><label>Or activity<input disabled={locked} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Review notes" /></label></>}
             {!settings.vaultPath && <div className="notice"><p>Select a writable Obsidian vault before starting.</p><button onClick={chooseVault}>Choose vault</button></div>}
           </div>

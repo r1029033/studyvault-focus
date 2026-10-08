@@ -26,7 +26,7 @@ npm run package   # build an unpacked desktop application
 ## How to use it
 
 1. Open **Settings** and choose a writable Obsidian vault.
-2. Choose **Focus** (25 minutes by default) or **Break** (5 minutes by default).
+2. Choose **Focus** (25, 35, or 45 minutes) or **Break** (5 minutes by default). During Focus, the bunny knits a red beanie, orange scarf, or blue floral cardigan to match the selected duration and shows it finished when the countdown ends.
 3. For Focus, select an active task from StudyVault Tasks or enter a short activity description.
 4. Start, pause, resume, stop, or complete the session.
 5. When a linked Focus session is completed, choose whether the linked task is also finished.

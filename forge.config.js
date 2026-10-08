@@ -4,9 +4,28 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 
 module.exports = {
   packagerConfig: {
-    asar: true,
+    asar: { unpack: '**/*.node' },
+    // The Vite main build leaves better-sqlite3 external because it contains a
+    // native .node binary. Include its runtime files here; the auto-unpack
+    // plugin moves the binary outside app.asar.
+    ignore: (file) => {
+      if (!file) return false;
+
+      const includedPaths = [
+        '/.vite',
+        '/node_modules/better-sqlite3',
+        '/node_modules/node-addon-api',
+      ];
+
+      return !includedPaths.some(
+        (includedPath) =>
+          file.startsWith(includedPath) || includedPath.startsWith(`${file}/`),
+      );
+    },
   },
-  rebuildConfig: {},
+  // better-sqlite3 13 ships an N-API binary that is compatible with Electron.
+  // Rebuilding would unnecessarily require Visual Studio C++ Build Tools.
+  rebuildConfig: { onlyModules: [] },
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
